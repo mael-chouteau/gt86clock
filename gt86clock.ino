@@ -1,3 +1,7 @@
+#include <DS3231.h>
+
+#include <DS3231.h>
+
 #include <U8g2lib.h> 
 
 #ifdef U8X8_HAVE_HW_I2C 
@@ -11,7 +15,7 @@ U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE, 
 MCP_CAN CAN0(15);             // Set CS to pin 15 (D8 on my NodeMCU)
 
 #include <EEPROM.h>
-#include "DS3231.h"
+#include <DS3231.h>
 
 #include <base64.h>
 
@@ -28,6 +32,7 @@ ESP8266WebServer server(80);
 WiFiManager wifiManager;
 
 #include <FS.h>
+#include <LittleFS.h>
 
 #include <NTPtimeESP.h>
 NTPtime NTPch("ch.pool.ntp.org");

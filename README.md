@@ -85,3 +85,128 @@ What used to be AM/PM button is changing the views new. A long press is either c
 * WiFiManager
 * WebServer
 * FS
+
+## Pinout
+
+| Function                | ESP8266 Pin | Module/Connection         |
+|-------------------------|-------------|--------------------------|
+| OLED SDA                | D2 (GPIO4)  | SSD1306 OLED (I2C)       |
+| OLED SCL                | D1 (GPIO5)  | SSD1306 OLED (I2C)       |
+| RTC SDA                 | D2 (GPIO4)  | DS3231 RTC (I2C shared)  |
+| RTC SCL                 | D1 (GPIO5)  | DS3231 RTC (I2C shared)  |
+| CAN CS                  | D8 (GPIO15) | MCP2515 CAN (SPI)        |
+| CAN INT                 | D0 (GPIO16) | MCP2515 CAN (Interrupt)  |
+| CAN MOSI                | D7 (GPIO13) | MCP2515 CAN (SPI)        |
+| CAN MISO                | D6 (GPIO12) | MCP2515 CAN (SPI)        |
+| CAN SCK                 | D5 (GPIO14) | MCP2515 CAN (SPI)        |
+| Oil Pressure Sensor     | A0          | Analog Input             |
+| Button 1 (MUX)          | D4 (GPIO2)  | Button/Diode Matrix      |
+| Button 2 (MUX)          | D3 (GPIO0)  | Button/Diode Matrix      |
+| 3.3V / GND              | 3.3V / GND  | All modules              |
+
+## Button Wiring and Diode Multiplexing
+
+The project uses 3 buttons (AM/PM, H, M) but only 2 GPIO pins on the ESP8266, thanks to a diode-multiplexing technique:
+
+- **Button 1 (AM/PM):** Connects between D4 (GPIO2) and GND, with a diode in series (anode to D4, cathode to button, then to GND).
+- **Button 2 (H):** Connects between D3 (GPIO0) and GND, with a diode in series (anode to D3, cathode to button, then to GND).
+- **Button 3 (M):** Connects between both D3 and D4 (GPIO0 and GPIO2) through two diodes (anode to each GPIO, cathodes joined together, then to button, then to GND).
+
+**Why use diodes?**
+The diodes prevent current from flowing back into the other GPIO pin, allowing the ESP8266 to detect which button is pressed even though two buttons share the same pins.
+
+**Wiring summary:**
+- Use 1N4148 or similar small-signal diodes.
+- Each button gets its own diode(s) as described above.
+- Connect the other side of each button to GND.
+
+## Oil Pressure Sensor Connection
+
+The oil pressure sensor outputs an analog voltage (0.5-4.5V) proportional to pressure, and is powered by 5-16V DC. Specs:
+- Output: 0.5-4.5V
+- Supply: 5-16V DC
+- Max current: 3mA
+- Output is ratiometric (analog)
+
+**Can you connect it directly to the ESP8266?**
+- The ESP8266 analog input (A0) accepts 0-1V by default. If you connect the sensor directly, you risk damaging the ESP8266!
+- **You must use a voltage divider** to scale the 0.5-4.5V output down to 0-1V for the ESP8266 A0 pin.
+- Example: Use a resistor divider (e.g., 180kΩ from sensor output to A0, 47kΩ from A0 to GND) to scale the voltage safely.
+- Alternatively, use an external ADC or an op-amp buffer if you want more accuracy.
+
+**Wiring summary:**
+- Sensor power: Connect sensor V+ to 5V, GND to GND.
+- Sensor output: Connect to a voltage divider, then to A0.
+- Do not connect the sensor output directly to A0 without scaling!
+
+### Voltage Divider for Oil Pressure Sensor
+
+To safely connect the sensor's 0.5–4.5V output to the ESP8266's 0–1V analog input, use a voltage divider:
+
+```
+Sensor Output (0.5–4.5V)
+   |
+   R1 (e.g., 180kΩ)
+   |
+   +----> To ESP8266 A0 (reads 0–1V)
+   |
+   R2 (e.g., 47kΩ)
+   |
+  GND
+```
+
+**How to calculate resistor values:**
+- The voltage at A0 is:  
+  `V_A0 = V_sensor * (R2 / (R1 + R2))`
+- For 0.5–4.5V in, you want 0–1V out:
+  - Example: R1 = 180kΩ, R2 = 47kΩ
+  - At 4.5V: 4.5V × (47k / (180k + 47k)) ≈ 0.96V
+  - At 0.5V: 0.5V × (47k / (180k + 47k)) ≈ 0.11V
+- This keeps the input safely within the ESP8266's range.
+- You can adjust R1 and R2 to fine-tune the range if needed.
+
+**Tip:** Use 1% tolerance resistors for best accuracy.
+
+## Calibrating and Reading the Oil Pressure Sensor
+
+### Reading the Sensor Value
+- The sensor output (after the voltage divider) connects to the ESP8266 A0 pin.
+- In code, use `analogRead(A0)` to get a value from 0 to 1023 (corresponding to 0–1V at A0).
+
+**Example:**
+```cpp
+int raw = analogRead(A0); // 0–1023
+float vA0 = raw * (1.0 / 1023.0); // 0–1V at A0
+```
+
+### Calculating the Actual Pressure
+1. **Reverse the voltage divider:**
+   - If you used R1 = 180kΩ and R2 = 47kΩ:
+   ```cpp
+   float vSensor = vA0 * ((180000.0 + 47000.0) / 47000.0); // ≈ vA0 * 4.83
+   ```
+2. **Convert voltage to pressure:**
+   - For a sensor with 0.5V = 0 PSI, 4.5V = 150 PSI:
+   ```cpp
+   float pressurePSI = (vSensor - 0.5) * (150.0 / 4.0); // 0.5V offset, 4V span
+   if (pressurePSI < 0) pressurePSI = 0; // Clamp to zero if negative
+   ```
+   - For bar: `float pressureBar = (vSensor - 0.5) * (10.0 / 4.0);`
+
+### Calibration Steps
+- **Zero calibration:** With the engine off (0 pressure), note the raw value. If it's not exactly 0.5V (after reversing the divider), adjust your code to subtract the actual zero voltage.
+- **Span calibration:** If you have a known pressure (e.g., using a test gauge), compare the calculated value to the real value and adjust the scaling factor if needed.
+- **Averaging:** For more stable readings, average several samples.
+
+### Summary Table
+| Step                | Formula/Action                                                                 |
+|---------------------|-------------------------------------------------------------------------------|
+| Read ADC            | `raw = analogRead(A0);`                                                       |
+| A0 Voltage          | `vA0 = raw * (1.0 / 1023.0);`                                                 |
+| Sensor Voltage      | `vSensor = vA0 * ((R1 + R2) / R2);`                                           |
+| Pressure (PSI)      | `pressure = (vSensor - 0.5) * (150.0 / 4.0);`                                 |
+| Pressure (bar)      | `pressure = (vSensor - 0.5) * (10.0 / 4.0);`                                  |
+
+**Tip:** Use a multimeter to measure the actual voltages for best calibration. Adjust the code if you notice a consistent offset or scaling error.
+
+For a more detailed schematic, see the code comments and hardware datasheets.

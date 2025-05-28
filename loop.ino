@@ -140,7 +140,16 @@ void loop(void) {
       drawLogo(updateCompleteDisplay);
       break;
     case CLOCK:
-      drawClock(updateCompleteDisplay);
+      if (updateCompleteDisplay) {
+        drawClock(true);
+      } else {
+        // Non-blocking blinking dots
+        if (millis() - lastDotToggle > 500) {
+          drawDots = !drawDots;
+          lastDotToggle = millis();
+          drawClock(false);
+        }
+      }
       break;
     case OILTEMP:
       drawOilTemp(updateCompleteDisplay);
